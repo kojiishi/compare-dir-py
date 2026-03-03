@@ -47,25 +47,25 @@ class FileComparisonResult:
         else:
             list.append("Unknown")
 
-        if self.modified_time_comparison is None:
+        if self.modified_time_comparison is not None:
+            if self.modified_time_comparison > 0:
+                list.append(f"{dir1_name} is newer")
+            elif self.modified_time_comparison < 0:
+                list.append(f"{dir2_name} is newer")
+        elif self.classification == self.IN_BOTH:
             list.append("Modified time not applicable")
-        elif self.modified_time_comparison > 0:
-            list.append(f"{dir1_name} is newer")
-        elif self.modified_time_comparison < 0:
-            list.append(f"{dir2_name} is newer")
 
-        if self.size_comparison is None:
-            pass
-        elif self.size_comparison > 0:
-            list.append(f"Size of {dir1_name} is larger")
-        elif self.size_comparison < 0:
-            list.append(f"Size of {dir2_name} is larger")
+        if self.size_comparison is not None:
+            if self.size_comparison > 0:
+                list.append(f"Size of {dir1_name} is larger")
+            elif self.size_comparison < 0:
+                list.append(f"Size of {dir2_name} is larger")
 
-        if self.is_content_same is None:
-            if not self.size_comparison:
-                list.append("Content comparison not applicable")
-        elif not self.is_content_same:
+        if self.is_content_same is not None:
+            if not self.is_content_same:
                 list.append("Content differ")
+        elif self.size_comparison == 0:
+            list.append("Content comparison not applicable")
 
         details = ", ".join(list)
         return f"{self.relative_path}: {details}"
