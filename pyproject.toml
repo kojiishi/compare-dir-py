@@ -10,7 +10,7 @@ dependencies = []
 repository = "https://github.com/kojiishi/compare-dir"
 
 [project.scripts]
-compare-dir = "compare_dir.directory_comparer:main"
+compare-dir = "compare_dir.comparer:main"
 
 [build-system]
 requires = ["setuptools>=80", "setuptools-scm[simple]>=9.2"]
