@@ -4,7 +4,9 @@ dynamic = ["version"]
 description = "Tool to compare files in two directories"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "tqdm>=4.67.3",
+]
 
 [project.urls]
 repository = "https://github.com/kojiishi/compare-dir"

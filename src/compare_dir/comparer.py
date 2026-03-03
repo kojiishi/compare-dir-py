@@ -5,8 +5,11 @@ from collections import deque
 import logging
 import os
 from pathlib import Path
+from typing import Callable
 import time
 import sys
+
+from tqdm import tqdm
 
 from compare_dir import __version__
 
@@ -112,10 +115,11 @@ class DirectoryComparer:
     """
     Compares two directories and yields FileComparisonResult objects for each file.
     """
-    def __init__(self, dir1: Path | str, dir2: Path | str, max_workers: int = 0):
+    def __init__(self, dir1: Path | str, dir2: Path | str, max_workers: int = 0, total_updated: Callable[[int], None] | None = None):
         self.dir1 = Path(dir1)
         self.dir2 = Path(dir2)
         self._max_workers = max_workers if max_workers > 0 else None
+        self._total_updated: Callable[[int], None] | None = total_updated
 
     def __enter__(self):
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=self._max_workers)
@@ -186,12 +190,14 @@ class DirectoryComparer:
         dir2_files = future2.result()
         logging.info("Scanning directories finished in %s.", time.strftime('%H:%M:%S', time.gmtime(time.monotonic() - start_time)))
 
-        all_files = sorted(set(dir1_files.keys()) | set(dir2_files.keys()))
+        all_files = set(dir1_files.keys()) | set(dir2_files.keys())
+        if self._total_updated:
+            self._total_updated(len(all_files))
         # A deque to hold futures and pre-computed results in sorted order.
         pending_queue = deque()
 
         # This loop will both queue work and yield completed results.
-        for rel_path in all_files:
+        for rel_path in sorted(all_files):
             in_dir1 = rel_path in dir1_files
             in_dir2 = rel_path in dir2_files
 
@@ -220,9 +226,7 @@ class DirectoryComparer:
                     # The first item in the queue is not ready, so we can't
                     # yield it yet. Break and queue more work.
                     break
-                queue.popleft()
-                yield first_item.result()
-                continue
+                first_item = first_item.result()
             assert isinstance(first_item, FileComparisonResult)
             queue.popleft()
             yield first_item
@@ -256,13 +260,25 @@ def main():
 
     start_time = time.monotonic()
     summary = ComparisonSummary()
+    progress: tqdm | None = None
+
+    def on_total_updated(total: int) -> None:
+        nonlocal progress
+        progress = tqdm(total=total)
+
     try:
-        with DirectoryComparer(args.dir1, args.dir2, max_workers=args.parallel) as comparer:
+        with DirectoryComparer(args.dir1, args.dir2, max_workers=args.parallel, total_updated=on_total_updated) as comparer: # type: ignore
             for result in comparer:
-                summary.update(result)
-                if result.is_identical():
-                    continue
-                print(result.to_string(args.dir1, args.dir2))
+                try:
+                    summary.update(result)
+                    if result.is_identical():
+                        continue
+                    if progress:
+                        progress.clear()
+                    print(result.to_string(args.dir1, args.dir2))
+                finally:
+                    if progress:
+                        progress.update()
 
         # Print the summary only if the comparison completes without interruption.
         print("\n--- Comparison Summary ---", file=sys.stderr)
@@ -271,6 +287,8 @@ def main():
         # The __exit__ method of DirectoryComparer handles the shutdown.
         pass
     finally:
+        if progress:
+            progress.close()
         print(f"Comparison finished in {time.strftime('%H:%M:%S', time.gmtime(time.monotonic() - start_time))}.", file=sys.stderr)
 
 if __name__ == "__main__":
