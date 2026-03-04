@@ -280,6 +280,8 @@ def main():
                 finally:
                     if progress:
                         progress.update()
+        if progress:
+            progress.close()
 
         # Print the summary only if the comparison completes without interruption.
         print("\n--- Comparison Summary ---", file=sys.stderr)
@@ -288,8 +290,6 @@ def main():
         # The __exit__ method of DirectoryComparer handles the shutdown.
         pass
     finally:
-        if progress:
-            progress.close()
         print(f"Comparison finished in {time.strftime('%H:%M:%S', time.gmtime(time.monotonic() - start_time))}.", file=sys.stderr)
 
 if __name__ == "__main__":
