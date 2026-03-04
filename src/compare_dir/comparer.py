@@ -30,6 +30,36 @@ class FileComparisonResult:
         self.size_comparison: int | None = None           # 1: dir1 > dir2, -1: dir2 > dir1, 0: same
         self.is_content_same: bool | None = None          # True: same, False: different
 
+    @staticmethod
+    def _compare_values(value1, value2) -> int:
+        """Compares two values and returns -1, 0, or 1."""
+        if value1 > value2:
+            return 1
+        if value2 > value1:
+            return -1
+        return 0
+
+    @staticmethod
+    def _compare_file_pair(rel_path: str, dir1_files: dict[str, Path], dir2_files: dict[str, Path]) -> "FileComparisonResult":
+        """Compares a single pair of files that exist in both directories."""
+        result = FileComparisonResult(rel_path, FileComparisonResult.IN_BOTH)
+        file1_path = dir1_files[rel_path]
+        file2_path = dir2_files[rel_path]
+
+        # Compare modified times and sizes.
+        stat1 = file1_path.stat()
+        stat2 = file2_path.stat()
+        result.modified_time_comparison = FileComparisonResult._compare_values(stat1.st_mtime, stat2.st_mtime)
+        result.size_comparison = FileComparisonResult._compare_values(stat1.st_size, stat2.st_size)
+
+        if result.size_comparison == 0:
+            # If size is the same, check file content
+            logging.info("Comparing content: %s", rel_path)
+            result.is_content_same = filecmp.cmp(
+                file1_path, file2_path, shallow=False
+            )
+        return result
+
     def is_identical(self):
         """Returns True if the file exists in both directories and is identical."""
         return (self.classification == self.IN_BOTH and
@@ -136,15 +166,6 @@ class DirectoryComparer:
             self.executor.shutdown(wait=True)
 
     @staticmethod
-    def _compare(value1, value2) -> int:
-        """Compares two modification times and returns -1, 0, or 1."""
-        if value1 > value2:
-            return 1
-        if value2 > value1:
-            return -1
-        return 0
-
-    @staticmethod
     def _get_files_in_directory(directory_path: Path | str) -> dict[str, Path]:
         """
         Walks through a directory and returns a dictionary of relative paths to absolute paths.
@@ -158,26 +179,6 @@ class DirectoryComparer:
                 relative_path = full_path.relative_to(base_directory)
                 file_map[str(relative_path)] = full_path
         return file_map
-
-    def _compare_file_pair(self, rel_path: str, dir1_files: dict[str, Path], dir2_files: dict[str, Path]) -> FileComparisonResult:
-        """Compares a single pair of files that exist in both directories."""
-        result = FileComparisonResult(rel_path, FileComparisonResult.IN_BOTH)
-        file1_path = dir1_files[rel_path]
-        file2_path = dir2_files[rel_path]
-
-        # Compare modified times and sizes.
-        stat1 = file1_path.stat()
-        stat2 = file2_path.stat()
-        result.modified_time_comparison = DirectoryComparer._compare(stat1.st_mtime, stat2.st_mtime)
-        result.size_comparison = DirectoryComparer._compare(stat1.st_size, stat2.st_size)
-
-        if result.size_comparison == 0:
-            # If size is the same, check file content
-            logging.info("Comparing content: %s", rel_path)
-            result.is_content_same = filecmp.cmp(
-                file1_path, file2_path, shallow=False
-            )
-        return result
 
     def __iter__(self):
         """Yields FileComparisonResult objects for each file."""
@@ -206,7 +207,7 @@ class DirectoryComparer:
             elif not in_dir1 and in_dir2:
                 pending_queue.append(FileComparisonResult(rel_path, FileComparisonResult.ONLY_IN_DIR2))
             else: # Exists in both
-                future = self.executor.submit(self._compare_file_pair, rel_path, dir1_files, dir2_files)
+                future = self.executor.submit(FileComparisonResult._compare_file_pair, rel_path, dir1_files, dir2_files)
                 pending_queue.append(future)
 
             # Try to yield from the front of the queue if the result is ready.
