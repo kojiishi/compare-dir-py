@@ -40,12 +40,10 @@ class FileComparisonResult:
         return 0
 
     @staticmethod
-    def _compare_file_pair(rel_path: str, dir1_files: dict[str, Path], dir2_files: dict[str, Path]) -> "FileComparisonResult":
+    def _compare_file_pair(file1_path: Path, file2_path: Path, rel_path: str) -> "FileComparisonResult":
         """Compares a single pair of files that exist in both directories."""
         result = FileComparisonResult(rel_path, FileComparisonResult.IN_BOTH)
-        file1_path = dir1_files[rel_path]
-        file2_path = dir2_files[rel_path]
-
+        
         # Compare modified times and sizes.
         stat1 = file1_path.stat()
         stat2 = file2_path.stat()
@@ -207,7 +205,9 @@ class DirectoryComparer:
             elif not in_dir1 and in_dir2:
                 pending_queue.append(FileComparisonResult(rel_path, FileComparisonResult.ONLY_IN_DIR2))
             else: # Exists in both
-                future = self.executor.submit(FileComparisonResult._compare_file_pair, rel_path, dir1_files, dir2_files)
+                file1_path = dir1_files[rel_path]
+                file2_path = dir2_files[rel_path]
+                future = self.executor.submit(FileComparisonResult._compare_file_pair, file1_path, file2_path, rel_path)
                 pending_queue.append(future)
 
             # Try to yield from the front of the queue if the result is ready.
