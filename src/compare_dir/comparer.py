@@ -65,7 +65,7 @@ class FileComparisonResult:
                 self.size_comparison == 0 and
                 self.is_content_same is True)
 
-    def to_string(self, dir1_name: str = 'dir1', dir2_name: str = 'dir2'):
+    def to_string(self, dir1_name: Path | str = 'dir1', dir2_name: Path | str = 'dir2'):
         """String representation of the file comparison result."""
         list = []
         if self.classification == self.ONLY_IN_DIR1:
@@ -129,7 +129,7 @@ class ComparisonSummary:
             elif result.is_content_same is False:
                 self.same_time_size_diff_content += 1
 
-    def print(self, dir1_name: str, dir2_name: str, file=sys.stdout):
+    def print(self, dir1_name: Path | str, dir2_name: Path | str, file=sys.stdout):
         """Prints the formatted summary."""
         print(f"Files in both: {self.in_both}", file=file)
         print(f"Files only in {dir1_name}: {self.only_in_dir1}", file=file)
@@ -143,9 +143,9 @@ class DirectoryComparer:
     """
     Compares two directories and yields FileComparisonResult objects for each file.
     """
-    def __init__(self, dir1: Path | str, dir2: Path | str, max_workers: int = 0, total_updated: Callable[[int], None] | None = None):
-        self.dir1 = Path(dir1)
-        self.dir2 = Path(dir2)
+    def __init__(self, dir1: Path, dir2: Path, max_workers: int = 0, total_updated: Callable[[int], None] | None = None):
+        self.dir1 = dir1
+        self.dir2 = dir2
         self._max_workers = max_workers if max_workers > 0 else None
         self._total_updated: Callable[[int], None] | None = total_updated
 
@@ -164,11 +164,12 @@ class DirectoryComparer:
             self.executor.shutdown(wait=True)
 
     @staticmethod
-    def _get_files_in_directory(directory_path: Path | str) -> dict[str, Path]:
+    def _get_files_in_directory(base_directory: Path) -> dict[str, Path]:
         """
         Walks through a directory and returns a dictionary of relative paths to absolute paths.
         """
-        base_directory = Path(directory_path)
+        if not base_directory.is_dir():
+            raise ValueError(f"{base_directory} is not a directory")
         file_map = {}
         for dirpath, _, filenames in os.walk(base_directory):
             current_dir_path = Path(dirpath)
@@ -232,43 +233,17 @@ class DirectoryComparer:
             queue.popleft()
             yield first_item
 
-def main():
-    """
-    Main function to parse arguments and print comparison results.
-    """
-    parser = argparse.ArgumentParser(description="Compare two directories.")
-    parser.add_argument("dir1", help="Path to the first directory.")
-    parser.add_argument("dir2", help="Path to the second directory.")
-    parser.add_argument("-p", "--parallel", type=int, default=0, help="Number of parallel threads for file comparison. If 0, uses the default.")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging to stderr.")
-    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
-    args = parser.parse_args()
+    @staticmethod
+    def run(dir1: Path, dir2: Path, max_workers: int | None = None):
+        start_time = time.monotonic()
+        summary = ComparisonSummary()
+        progress: tqdm | None = None
 
-    dir1_path = Path(args.dir1)
-    dir2_path = Path(args.dir2)
+        def on_total_updated(total: int) -> None:
+            nonlocal progress
+            progress = tqdm(total=total)
 
-    if args.verbose:
-        logging.basicConfig(level=logging.INFO,
-                            format='%(levelname)s: %(message)s',
-                            stream=sys.stderr)
-
-    if not dir1_path.is_dir():
-        print(f"Error: Directory not found at '{args.dir1}'", file=sys.stderr)
-        return
-    if not dir2_path.is_dir():
-        print(f"Error: Directory not found at '{args.dir2}'", file=sys.stderr)
-        return
-
-    start_time = time.monotonic()
-    summary = ComparisonSummary()
-    progress: tqdm | None = None
-
-    def on_total_updated(total: int) -> None:
-        nonlocal progress
-        progress = tqdm(total=total)
-
-    try:
-        with DirectoryComparer(args.dir1, args.dir2, max_workers=args.parallel, total_updated=on_total_updated) as comparer: # type: ignore
+        with DirectoryComparer(dir1, dir2, max_workers=max_workers, total_updated=on_total_updated) as comparer: # type: ignore
             for result in comparer:
                 try:
                     summary.update(result)
@@ -276,7 +251,7 @@ def main():
                         continue
                     if progress:
                         progress.clear()
-                    print(result.to_string(args.dir1, args.dir2))
+                    print(result.to_string(dir1, dir2))
                 finally:
                     if progress:
                         progress.update()
@@ -285,12 +260,30 @@ def main():
 
         # Print the summary only if the comparison completes without interruption.
         print("\n--- Comparison Summary ---", file=sys.stderr)
-        summary.print(args.dir1, args.dir2, file=sys.stderr)
+        summary.print(dir1, dir2, file=sys.stderr)
+        print(f"Comparison finished in {time.strftime('%H:%M:%S', time.gmtime(time.monotonic() - start_time))}.", file=sys.stderr)
+
+def main():
+    """
+    Main function to parse arguments and print comparison results.
+    """
+    parser = argparse.ArgumentParser(description="Compare two directories.")
+    parser.add_argument("dir1", type=Path, help="Path to the first directory.")
+    parser.add_argument("dir2", type=Path, help="Path to the second directory.")
+    parser.add_argument("-p", "--parallel", type=int, default=0, help="Number of parallel threads for file comparison. If 0, uses the default.")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging to stderr.")
+    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
+    args = parser.parse_args()
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO,
+                            format='%(levelname)s: %(message)s',
+                            stream=sys.stderr)
+
+    try:
+        DirectoryComparer.run(args.dir1, args.dir2, max_workers=args.parallel)
     except KeyboardInterrupt:
         # The __exit__ method of DirectoryComparer handles the shutdown.
         pass
-    finally:
-        print(f"Comparison finished in {time.strftime('%H:%M:%S', time.gmtime(time.monotonic() - start_time))}.", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
