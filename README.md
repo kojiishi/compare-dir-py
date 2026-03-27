@@ -1,5 +1,9 @@
 # compare-dir
 
+> [!CAUTION]
+> This tool is not actively maintained.
+> Please see [compare-dir](https://github.com/kojiishi/compare-dir) for the successor.
+
 Tool to compare files in two directories.
 Useful to verify backup copies.
 
